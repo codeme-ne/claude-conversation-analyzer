@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Große Datei Analyzer - 80MB+</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <style>
+        .file-drop-zone {
+            border: 2px dashed #cbd5e1;
+            transition: all 0.3s ease;
+        }
+        .file-drop-zone.dragover {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+        .progress-bar {
+            transition: width 0.3s ease;
+        }
+        .memory-usage {
+            background: linear-gradient(90deg, #10b981, #3b82f6, #f59e0b, #ef4444);
+        }
+        .file-info-card {
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .analysis-section {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useCallback, useRef } = React;
+        const { 
+            Upload, FileText, BarChart3, Search, Download, 
+            AlertCircle, CheckCircle, Clock, HardDrive, 
+            TrendingUp, Filter, Settings, Play, Pause, Stop,
+            Info, Zap, Database, Cpu, Memory
+        } = lucide;
+
+        // Utility Functions
+        const formatBytes = (bytes) => {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        };
+
+        const formatTime = (ms) => {
+            if (ms < 1000) return `${ms}ms`;
+            if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+            return `${(ms / 60000).toFixed(1)}min`;
+        };
+
+        // File Analyzer Component
+        const FileAnalyzer = () => {
+            const [file, setFile] = useState(null);
+            const [analysis, setAnalysis] = useState(null);
+            const [isAnalyzing, setIsAnalyzing] = useState(false);
+            const [progress, setProgress] = useState(0);
+            const [memoryUsage, setMemoryUsage] = useState(0);
+            const [analysisTime, setAnalysisTime] = useState(0);
+            const [error, setError] = useState(null);
+            const [analysisType, setAnalysisType] = useState('basic');
+            const [chunkSize, setChunkSize] = useState(1024 * 1024); // 1MB chunks
+            const [isPaused, setIsPaused] = useState(false);
+            const [worker, setWorker] = useState(null);
+            const fileReaderRef = useRef(null);
+            const abortControllerRef = useRef(null);
+
+            // Memory monitoring
+            useEffect(() => {
+                const updateMemoryUsage = () => {
+                    if (performance.memory) {
+                        setMemoryUsage(performance.memory.usedJSHeapSize);
+                    }
+                };
+                
+                const interval = setInterval(updateMemoryUsage, 1000);
+                return () => clearInterval(interval);
+            }, []);
+
+            // File processing with streaming
+            const processFileInChunks = useCallback(async (file, onProgress, onChunk) => {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    fileReaderRef.current = reader;
+                    
+                    let offset = 0;
+                    const totalSize = file.size;
+                    const chunks = [];
+                    
+                    reader.onload = (e) => {
+                        const chunk = e.target.result;
+                        chunks.push(chunk);
+                        
+                        // Process chunk
+                        onChunk(chunk, offset);
+                        
+                        offset += chunk.byteLength;
+                        const progressPercent = (offset / totalSize) * 100;
+                        onProgress(progressPercent);
+                        
+                        // Continue reading if not finished
+                        if (offset < totalSize && !isPaused) {
+                            const nextChunk = file.slice(offset, offset + chunkSize);
+                            reader.readAsArrayBuffer(nextChunk);
+                        } else if (offset >= totalSize) {
+                            resolve(chunks);
+                        }
+                    };
+                    
+                    reader.onerror = () => reject(new Error('Fehler beim Lesen der Datei'));
+                    
+                    // Start reading first chunk
+                    const firstChunk = file.slice(0, chunkSize);
+                    reader.readAsArrayBuffer(firstChunk);
+                });
+            }, [chunkSize, isPaused]);
+
+            // Analysis functions
+            const analyzeBasic = useCallback((data) => {
+                const analysis = {
+                    fileSize: data.length,
+                    characterCount: 0,
+                    lineCount: 0,
+                    wordCount: 0,
+                    uniqueWords: new Set(),
+                    characterFrequency: {},
+                    lineLengths: [],
+                    encoding: 'UTF-8',
+                    fileType: 'Unknown'
+                };
+
+                const text = new TextDecoder().decode(data);
+                const lines = text.split('\n');
+                
+                analysis.lineCount = lines.length;
+                analysis.characterCount = text.length;
+                
+                lines.forEach(line => {
+                    analysis.lineLengths.push(line.length);
+                    const words = line.toLowerCase().match(/\b\w+\b/g) || [];
+                    analysis.wordCount += words.length;
+                    words.forEach(word => analysis.uniqueWords.add(word));
+                });
+                
+                analysis.uniqueWords = analysis.uniqueWords.size;
+                
+                // Character frequency
+                for (let char of text) {
+                    analysis.characterFrequency[char] = (analysis.characterFrequency[char] || 0) + 1;
+                }
+                
+                return analysis;
+            }, []);
+
+            const analyzeJSON = useCallback((data) => {
+                const text = new TextDecoder().decode(data);
+                const analysis = {
+                    ...analyzeBasic(data),
+                    jsonStructure: {},
+                    maxDepth: 0,
+                    objectCount: 0,
+                    arrayCount: 0,
+                    stringCount: 0,
+                    numberCount: 0,
+                    booleanCount: 0,
+                    nullCount: 0
+                };
+
+                try {
+                    const json = JSON.parse(text);
+                    const analyzeStructure = (obj, depth = 0) => {
+                        analysis.maxDepth = Math.max(analysis.maxDepth, depth);
+                        
+                        if (Array.isArray(obj)) {
+                            analysis.arrayCount++;
+                            obj.forEach(item => analyzeStructure(item, depth + 1));
+                        } else if (obj && typeof obj === 'object') {
+                            analysis.objectCount++;
+                            Object.values(obj).forEach(value => analyzeStructure(value, depth + 1));
+                        } else if (typeof obj === 'string') {
+                            analysis.stringCount++;
+                        } else if (typeof obj === 'number') {
+                            analysis.numberCount++;
+                        } else if (typeof obj === 'boolean') {
+                            analysis.booleanCount++;
+                        } else if (obj === null) {
+                            analysis.nullCount++;
+                        }
+                    };
+                    
+                    analyzeStructure(json);
+                } catch (e) {
+                    analysis.jsonError = e.message;
+                }
+                
+                return analysis;
+            }, []);
+
+            const analyzeCSV = useCallback((data) => {
+                const text = new TextDecoder().decode(data);
+                const lines = text.split('\n');
+                const analysis = {
+                    ...analyzeBasic(data),
+                    csvStructure: {
+                        columns: [],
+                        rowCount: 0,
+                        columnCount: 0,
+                        delimiter: ',',
+                        hasHeader: false
+                    }
+                };
+
+                if (lines.length > 0) {
+                    const firstLine = lines[0];
+                    const delimiters = [',', ';', '\t', '|'];
+                    let detectedDelimiter = ',';
+                    
+                    // Detect delimiter
+                    for (const delimiter of delimiters) {
+                        const parts = firstLine.split(delimiter);
+                        if (parts.length > analysis.csvStructure.columnCount) {
+                            analysis.csvStructure.columnCount = parts.length;
+                            detectedDelimiter = delimiter;
+                        }
+                    }
+                    
+                    analysis.csvStructure.delimiter = detectedDelimiter;
+                    analysis.csvStructure.columns = firstLine.split(detectedDelimiter);
+                    analysis.csvStructure.rowCount = lines.length - 1;
+                    analysis.csvStructure.hasHeader = true;
+                }
+                
+                return analysis;
+            }, []);
+
+            // Main analysis function
+            const startAnalysis = useCallback(async () => {
+                if (!file) return;
+                
+                setIsAnalyzing(true);
+                setProgress(0);
+                setError(null);
+                setAnalysis(null);
+                setAnalysisTime(0);
+                abortControllerRef.current = new AbortController();
+                
+                const startTime = performance.now();
+                
+                try {
+                    let accumulatedData = new Uint8Array(0);
+                    let analysisResult = null;
+                    
+                    await processFileInChunks(
+                        file,
+                        (progressPercent) => {
+                            if (!isPaused) {
+                                setProgress(progressPercent);
+                            }
+                        },
+                        (chunk, offset) => {
+                            // Convert ArrayBuffer to Uint8Array
+                            const chunkArray = new Uint8Array(chunk);
+                            
+                            // Combine with accumulated data
+                            const newData = new Uint8Array(accumulatedData.length + chunkArray.length);
+                            newData.set(accumulatedData);
+                            newData.set(chunkArray, accumulatedData.length);
+                            accumulatedData = newData;
+                            
+                            // Perform analysis based on type
+                            if (analysisType === 'json') {
+                                analysisResult = analyzeJSON(accumulatedData);
+                            } else if (analysisType === 'csv') {
+                                analysisResult = analyzeCSV(accumulatedData);
+                            } else {
+                                analysisResult = analyzeBasic(accumulatedData);
+                            }
+                        }
+                    );
+                    
+                    const endTime = performance.now();
+                    setAnalysisTime(endTime - startTime);
+                    setAnalysis(analysisResult);
+                    
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setIsAnalyzing(false);
+                    setProgress(100);
+                }
+            }, [file, analysisType, processFileInChunks, analyzeBasic, analyzeJSON, analyzeCSV, isPaused]);
+
+            const handleFileDrop = useCallback((e) => {
+                e.preventDefault();
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    setFile(files[0]);
+                    setAnalysis(null);
+                    setError(null);
+                }
+            }, []);
+
+            const handleFileSelect = useCallback((e) => {
+                const files = e.target.files;
+                if (files.length > 0) {
+                    setFile(files[0]);
+                    setAnalysis(null);
+                    setError(null);
+                }
+            }, []);
+
+            const pauseAnalysis = useCallback(() => {
+                setIsPaused(true);
+                if (fileReaderRef.current) {
+                    fileReaderRef.current.abort();
+                }
+            }, []);
+
+            const resumeAnalysis = useCallback(() => {
+                setIsPaused(false);
+                startAnalysis();
+            }, [startAnalysis]);
+
+            const stopAnalysis = useCallback(() => {
+                setIsAnalyzing(false);
+                setIsPaused(false);
+                setProgress(0);
+                if (fileReaderRef.current) {
+                    fileReaderRef.current.abort();
+                }
+                if (abortControllerRef.current) {
+                    abortControllerRef.current.abort();
+                }
+            }, []);
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+                    <div className="container mx-auto px-4 py-8">
+                        {/* Header */}
+                        <div className="text-center mb-8">
+                            <h1 className="text-4xl font-bold text-gray-800 mb-2">
+                                <Database className="inline-block w-8 h-8 mr-2" />
+                                Große Datei Analyzer
+                            </h1>
+                            <p className="text-gray-600 text-lg">
+                                Analysieren Sie Dateien über 80MB mit fortschrittlichen Streaming-Techniken
+                            </p>
+                        </div>
+
+                        {/* File Upload Section */}
+                        <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
+                            <div className="text-center">
+                                <h2 className="text-2xl font-semibold mb-4">Datei hochladen</h2>
+                                
+                                <div 
+                                    className="file-drop-zone rounded-lg p-8 border-2 border-dashed border-gray-300 hover:border-blue-400 transition-colors cursor-pointer"
+                                    onDrop={handleFileDrop}
+                                    onDragOver={(e) => e.preventDefault()}
+                                    onClick={() => document.getElementById('file-input').click()}
+                                >
+                                    <Upload className="w-16 h-16 mx-auto text-gray-400 mb-4" />
+                                    <p className="text-lg text-gray-600 mb-2">
+                                        Datei hier hineinziehen oder klicken zum Auswählen
+                                    </p>
+                                    <p className="text-sm text-gray-500">
+                                        Unterstützt: JSON, CSV, TXT, und andere Textdateien über 80MB
+                                    </p>
+                                    <input 
+                                        id="file-input"
+                                        type="file" 
+                                        className="hidden" 
+                                        onChange={handleFileSelect}
+                                        accept=".json,.csv,.txt,.log,.xml,.yaml,.yml"
+                                    />
+                                </div>
+
+                                {file && (
+                                    <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center">
+                                                <FileText className="w-5 h-5 text-blue-500 mr-2" />
+                                                <span className="font-medium">{file.name}</span>
+                                            </div>
+                                            <span className="text-sm text-gray-500">
+                                                {formatBytes(file.size)}
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Analysis Controls */}
+                        {file && (
+                            <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
+                                <h2 className="text-2xl font-semibold mb-4">Analyse-Einstellungen</h2>
+                                
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                            Analysetyp
+                                        </label>
+                                        <select 
+                                            value={analysisType}
+                                            onChange={(e) => setAnalysisType(e.target.value)}
+                                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        >
+                                            <option value="basic">Grundlegende Analyse</option>
+                                            <option value="json">JSON Struktur</option>
+                                            <option value="csv">CSV Struktur</option>
+                                        </select>
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                            Chunk-Größe
+                                        </label>
+                                        <select 
+                                            value={chunkSize / (1024 * 1024)}
+                                            onChange={(e) => setChunkSize(e.target.value * 1024 * 1024)}
+                                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        >
+                                            <option value={0.5}>0.5 MB</option>
+                                            <option value={1}>1 MB</option>
+                                            <option value={2}>2 MB</option>
+                                            <option value={5}>5 MB</option>
+                                            <option value={10}>10 MB</option>
+                                        </select>
+                                    </div>
+                                    
+                                    <div className="flex items-end">
+                                        <button
+                                            onClick={startAnalysis}
+                                            disabled={isAnalyzing}
+                                            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-3 px-6 rounded-lg transition-colors flex items-center justify-center"
+                                        >
+                                            {isAnalyzing ? (
+                                                <>
+                                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                                                    Analysiere...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Play className="w-4 h-4 mr-2" />
+                                                    Analyse starten
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Progress Bar */}
+                                {isAnalyzing && (
+                                    <div className="mb-4">
+                                        <div className="flex justify-between text-sm text-gray-600 mb-2">
+                                            <span>Fortschritt</span>
+                                            <span>{progress.toFixed(1)}%</span>
+                                        </div>
+                                        <div className="w-full bg-gray-200 rounded-full h-2">
+                                            <div 
+                                                className="progress-bar bg-blue-600 h-2 rounded-full"
+                                                style={{ width: `${progress}%` }}
+                                            ></div>
+                                        </div>
+                                        
+                                        <div className="flex justify-between mt-4">
+                                            <div className="flex items-center text-sm text-gray-600">
+                                                <Memory className="w-4 h-4 mr-1" />
+                                                Speicher: {formatBytes(memoryUsage)}
+                                            </div>
+                                            <div className="flex items-center text-sm text-gray-600">
+                                                <Clock className="w-4 h-4 mr-1" />
+                                                Zeit: {analysisTime > 0 ? formatTime(analysisTime) : '--'}
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="flex gap-2 mt-4">
+                                            {isPaused ? (
+                                                <button
+                                                    onClick={resumeAnalysis}
+                                                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center"
+                                                >
+                                                    <Play className="w-4 h-4 mr-1" />
+                                                    Fortsetzen
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    onClick={pauseAnalysis}
+                                                    disabled={!isAnalyzing}
+                                                    className="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-lg flex items-center"
+                                                >
+                                                    <Pause className="w-4 h-4 mr-1" />
+                                                    Pausieren
+                                                </button>
+                                            )}
+                                            <button
+                                                onClick={stopAnalysis}
+                                                disabled={!isAnalyzing}
+                                                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg flex items-center"
+                                            >
+                                                <Stop className="w-4 h-4 mr-1" />
+                                                Stoppen
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Error Display */}
+                        {error && (
+                            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-8">
+                                <div className="flex items-center">
+                                    <AlertCircle className="w-5 h-5 text-red-500 mr-2" />
+                                    <span className="text-red-800">{error}</span>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Analysis Results */}
+                        {analysis && (
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                {/* Basic Statistics */}
+                                <div className="bg-white rounded-xl shadow-lg p-6">
+                                    <h3 className="text-xl font-semibold mb-4 flex items-center">
+                                        <BarChart3 className="w-5 h-5 mr-2" />
+                                        Grundlegende Statistiken
+                                    </h3>
+                                    
+                                    <div className="space-y-4">
+                                        <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                                            <span className="font-medium">Dateigröße:</span>
+                                            <span className="text-blue-600 font-semibold">
+                                                {formatBytes(analysis.fileSize)}
+                                            </span>
+                                        </div>
+                                        
+                                        <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                                            <span className="font-medium">Zeichen:</span>
+                                            <span className="text-green-600 font-semibold">
+                                                {analysis.characterCount.toLocaleString()}
+                                            </span>
+                                        </div>
+                                        
+                                        <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                                            <span className="font-medium">Zeilen:</span>
+                                            <span className="text-purple-600 font-semibold">
+                                                {analysis.lineCount.toLocaleString()}
+                                            </span>
+                                        </div>
+                                        
+                                        <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                                            <span className="font-medium">Wörter:</span>
+                                            <span className="text-orange-600 font-semibold">
+                                                {analysis.wordCount.toLocaleString()}
+                                            </span>
+                                        </div>
+                                        
+                                        <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                                            <span className="font-medium">Eindeutige Wörter:</span>
+                                            <span className="text-red-600 font-semibold">
+                                                {analysis.uniqueWords.toLocaleString()}
+                                            </span>
+                                        </div>
+                                        
+                                        {analysis.analysisTime && (
+                                            <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                                                <span className="font-medium">Analyse-Zeit:</span>
+                                                <span className="text-indigo-600 font-semibold">
+                                                    {formatTime(analysis.analysisTime)}
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Detailed Analysis */}
+                                <div className="bg-white rounded-xl shadow-lg p-6">
+                                    <h3 className="text-xl font-semibold mb-4 flex items-center">
+                                        <Search className="w-5 h-5 mr-2" />
+                                        Detaillierte Analyse
+                                    </h3>
+                                    
+                                    {analysisType === 'json' && analysis.jsonStructure && (
+                                        <div className="space-y-4">
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="p-3 bg-blue-50 rounded-lg">
+                                                    <div className="text-sm text-blue-600 font-medium">Objekte</div>
+                                                    <div className="text-2xl font-bold text-blue-800">
+                                                        {analysis.objectCount.toLocaleString()}
+                                                    </div>
+                                                </div>
+                                                <div className="p-3 bg-green-50 rounded-lg">
+                                                    <div className="text-sm text-green-600 font-medium">Arrays</div>
+                                                    <div className="text-2xl font-bold text-green-800">
+                                                        {analysis.arrayCount.toLocaleString()}
+                                                    </div>
+                                                </div>
+                                                <div className="p-3 bg-purple-50 rounded-lg">
+                                                    <div className="text-sm text-purple-600 font-medium">Strings</div>
+                                                    <div className="text-2xl font-bold text-purple-800">
+                                                        {analysis.stringCount.toLocaleString()}
+                                                    </div>
+                                                </div>
+                                                <div className="p-3 bg-orange-50 rounded-lg">
+                                                    <div className="text-sm text-orange-600 font-medium">Zahlen</div>
+                                                    <div className="text-2xl font-bold text-orange-800">
+                                                        {analysis.numberCount.toLocaleString()}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="p-3 bg-gray-50 rounded-lg">
+                                                <div className="text-sm text-gray-600 font-medium">Maximale Tiefe</div>
+                                                <div className="text-xl font-bold text-gray-800">
+                                                    {analysis.maxDepth}
+                                                </div>
+                                            </div>
+                                            
+                                            {analysis.jsonError && (
+                                                <div className="p-3 bg-red-50 rounded-lg">
+                                                    <div className="text-sm text-red-600 font-medium">JSON Fehler</div>
+                                                    <div className="text-sm text-red-800">{analysis.jsonError}</div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                    
+                                    {analysisType === 'csv' && analysis.csvStructure && (
+                                        <div className="space-y-4">
+                                            <div className="p-3 bg-blue-50 rounded-lg">
+                                                <div className="text-sm text-blue-600 font-medium">Spalten</div>
+                                                <div className="text-2xl font-bold text-blue-800">
+                                                    {analysis.csvStructure.columnCount}
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="p-3 bg-green-50 rounded-lg">
+                                                <div className="text-sm text-green-600 font-medium">Zeilen</div>
+                                                <div className="text-2xl font-bold text-green-800">
+                                                    {analysis.csvStructure.rowCount.toLocaleString()}
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="p-3 bg-purple-50 rounded-lg">
+                                                <div className="text-sm text-purple-600 font-medium">Trennzeichen</div>
+                                                <div className="text-xl font-bold text-purple-800">
+                                                    "{analysis.csvStructure.delimiter}"
+                                                </div>
+                                            </div>
+                                            
+                                            {analysis.csvStructure.columns.length > 0 && (
+                                                <div className="p-3 bg-gray-50 rounded-lg">
+                                                    <div className="text-sm text-gray-600 font-medium mb-2">Spaltennamen</div>
+                                                    <div className="text-sm text-gray-800 max-h-32 overflow-y-auto">
+                                                        {analysis.csvStructure.columns.join(', ')}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                    
+                                    {/* Character Frequency */}
+                                    {analysis.characterFrequency && (
+                                        <div className="mt-6">
+                                            <h4 className="font-medium mb-3">Häufigste Zeichen</h4>
+                                            <div className="space-y-2 max-h-40 overflow-y-auto">
+                                                {Object.entries(analysis.characterFrequency)
+                                                    .sort(([,a], [,b]) => b - a)
+                                                    .slice(0, 10)
+                                                    .map(([char, count]) => (
+                                                        <div key={char} className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                                                            <span className="font-mono">{char === ' ' ? 'Leerzeichen' : char}</span>
+                                                            <span className="text-sm text-gray-600">{count.toLocaleString()}</span>
+                                                        </div>
+                                                    ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Performance Tips */}
+                        <div className="mt-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl p-6 text-white">
+                            <h3 className="text-xl font-semibold mb-4 flex items-center">
+                                <Zap className="w-5 h-5 mr-2" />
+                                Performance-Tipps für große Dateien
+                            </h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                                <div>
+                                    <h4 className="font-medium mb-2">Optimale Chunk-Größe</h4>
+                                    <p>Verwenden Sie 1-2MB Chunks für beste Performance bei Dateien über 100MB.</p>
+                                </div>
+                                <div>
+                                    <h4 className="font-medium mb-2">Speicher-Management</h4>
+                                    <p>Die App verwendet Streaming-Techniken um Speicher effizient zu nutzen.</p>
+                                </div>
+                                <div>
+                                    <h4 className="font-medium mb-2">Pausieren & Fortsetzen</h4>
+                                    <p>Sie können die Analyse jederzeit pausieren und später fortsetzen.</p>
+                                </div>
+                                <div>
+                                    <h4 className="font-medium mb-2">Browser-Kompatibilität</h4>
+                                    <p>Funktioniert am besten mit Chrome, Firefox und Edge.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // Render App
+        ReactDOM.render(<FileAnalyzer />, document.getElementById('root'));
+    </script>
+</body>
+</html>
