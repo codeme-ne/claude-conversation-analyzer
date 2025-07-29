@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Conversation Viewer</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useCallback } = React;
+        const { Calendar, Search, Download, MessageSquare, ChevronDown, ChevronRight, Bug, AlertCircle } = lucide;
+
+        const App = () => {
+            const [conversations, setConversations] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState(null);
+            const [searchTerm, setSearchTerm] = useState('');
+            const [selectedFilter, setSelectedFilter] = useState('all');
+            const [expandedDays, setExpandedDays] = useState(new Set());
+            const [expandedConversations, setExpandedConversations] = useState(new Set());
+            const [debugMode, setDebugMode] = useState(false);
+            const [jsonStructure, setJsonStructure] = useState(null);
+
+            // Robuste Funktion zum Extrahieren von Text aus verschiedenen Message-Formaten
+            const extractMessageText = (message) => {
+                if (!message) return '';
+                
+                // Direkte Text-Property
+                if (typeof message === 'string') return message;
+                if (message.text) return message.text;
+                if (message.content) {
+                    if (typeof message.content === 'string') return message.content;
+                    if (Array.isArray(message.content)) {
+                        return message.content
+                            .map(item => {
+                                if (typeof item === 'string') return item;
+                                if (item.text) return item.text;
+                                if (item.content) return item.content;
+                                return '';
+                            })
+                            .join(' ');
+                    }
+                    if (message.content.text) return message.content.text;
+                }
+                
+                // Nested message structure mit mapping
+                if (message.mapping) {
+                    const mappingValues = Object.values(message.mapping);
+                    return mappingValues
+                        .map(item => {
+                            if (item.message) return extractMessageText(item.message);
+                            return '';
+                        })
+                        .join(' ');
+                }
+                
+                // Fallback: Versuche alle string-Properties zu finden
+                const textProperties = ['body', 'value', 'data', 'message_text', 'response'];
+                for (const prop of textProperties) {
+                    if (message[prop] && typeof message[prop] === 'string') {
+                        return message[prop];
+                    }
+                }
+                
+                return JSON.stringify(message).substring(0, 200);
+            };
+
+            // Robuste Funktion zum Parsen verschiedener Claude Export-Formate
+            const parseConversations = (data) => {
+                const parsedConversations = [];
+                
+                try {
+                    // Debug-Ausgabe der Datenstruktur
+                    console.log('Analysiere JSON-Struktur:', {
+                        hasConversations: !!data.conversations,
+                        conversationsType: typeof data.conversations,
+                        isArray: Array.isArray(data.conversations),
+                        keys: Object.keys(data).slice(0, 10)
+                    });
+
+                    // Format 1: conversations als Object mit IDs
+                    if (data.conversations && typeof data.conversations === 'object' && !Array.isArray(data.conversations)) {
+                        console.log('Format 1 erkannt: conversations als Object');
+                        Object.entries(data.conversations).forEach(([id, conv]) => {
+                            const messages = [];
+                            
+                            // Verschiedene Message-Strukturen unterstützen
+                            if (conv.messages && Array.isArray(conv.messages)) {
+                                conv.messages.forEach(msg => {
+                                    messages.push({
+                                        role: msg.role || msg.sender || msg.author?.role || 'unknown',
+                                        content: extractMessageText(msg),
+                                        timestamp: msg.created_at || msg.timestamp || msg.create_time || new Date().toISOString()
+                                    });
+                                });
+                            } else if (conv.mapping) {
+                                // Nested mapping structure
+                                const sortedMapping = Object.entries(conv.mapping)
+                                    .sort((a, b) => {
+                                        const timeA = a[1].message?.create_time || 0;
+                                        const timeB = b[1].message?.create_time || 0;
+                                        return timeA - timeB;
+                                    });
+                                
+                                sortedMapping.forEach(([key, item]) => {
+                                    if (item.message && item.message.content) {
+                                        messages.push({
+                                            role: item.message.author?.role || item.message.role || 'unknown',
+                                            content: extractMessageText(item.message),
+                                            timestamp: item.message.create_time || new Date().toISOString()
+                                        });
+                                    }
+                                });
+                            } else if (conv.conversation && Array.isArray(conv.conversation)) {
+                                // Alternative structure
+                                conv.conversation.forEach(msg => {
+                                    messages.push({
+                                        role: msg.role || msg.type || msg.author || 'unknown',
+                                        content: extractMessageText(msg),
+                                        timestamp: msg.timestamp || msg.created_at || new Date().toISOString()
+                                    });
+                                });
+                            }
+                            
+                            if (messages.length > 0) {
+                                parsedConversations.push({
+                                    id: id,
+                                    title: conv.title || conv.name || `Konversation ${id.substring(0, 8)}`,
+                                    messages: messages,
+                                    created_at: conv.created_at || conv.create_time || messages[0]?.timestamp,
+                                    updated_at: conv.updated_at || conv.update_time || messages[messages.length - 1]?.timestamp
+                                });
+                            }
+                        });
+                    }
+                    
+                    // Format 2: conversations als Array
+                    else if (data.conversations && Array.isArray(data.conversations)) {
+                        data.conversations.forEach((conv, index) => {
+                            const messages = [];
+                            
+                            if (conv.messages && Array.isArray(conv.messages)) {
+                                conv.messages.forEach(msg => {
+                                    messages.push({
+                                        role: msg.role || msg.sender || 'unknown',
+                                        content: extractMessageText(msg),
+                                        timestamp: msg.created_at || msg.timestamp || new Date().toISOString()
+                                    });
+                                });
+                            }
+                            
+                            if (messages.length > 0) {
+                                parsedConversations.push({
+                                    id: conv.id || `conv-${index}`,
+                                    title: conv.title || conv.name || `Konversation ${index + 1}`,
+                                    messages: messages,
+                                    created_at: conv.created_at || messages[0]?.timestamp,
+                                    updated_at: conv.updated_at || messages[messages.length - 1]?.timestamp
+                                });
+                            }
+                        });
+                    }
+                    
+                    // Format 3: Direkte Array-Struktur
+                    else if (Array.isArray(data)) {
+                        data.forEach((conv, index) => {
+                            const messages = [];
+                            
+                            if (conv.messages) {
+                                conv.messages.forEach(msg => {
+                                    messages.push({
+                                        role: msg.role || 'unknown',
+                                        content: extractMessageText(msg),
+                                        timestamp: msg.timestamp || new Date().toISOString()
+                                    });
+                                });
+                            }
+                            
+                            if (messages.length > 0) {
+                                parsedConversations.push({
+                                    id: conv.id || `conv-${index}`,
+                                    title: conv.title || `Konversation ${index + 1}`,
+                                    messages: messages,
+                                    created_at: conv.created_at || messages[0]?.timestamp,
+                                    updated_at: conv.updated_at || messages[messages.length - 1]?.timestamp
+                                });
+                            }
+                        });
+                    }
+                    
+                    // Format 4: Einzelne Konversation
+                    else if (data.messages && Array.isArray(data.messages)) {
+                        const messages = data.messages.map(msg => ({
+                            role: msg.role || 'unknown',
+                            content: extractMessageText(msg),
+                            timestamp: msg.timestamp || new Date().toISOString()
+                        }));
+                        
+                        if (messages.length > 0) {
+                            parsedConversations.push({
+                                id: 'single-conv',
+                                title: data.title || 'Konversation',
+                                messages: messages,
+                                created_at: messages[0]?.timestamp,
+                                updated_at: messages[messages.length - 1]?.timestamp
+                            });
+                        }
+                    }
+                    
+                    console.log(`Erfolgreich ${parsedConversations.length} Konversationen geparst`);
+                    return parsedConversations;
+                    
+                } catch (error) {
+                    console.error('Fehler beim Parsen der Konversationen:', error);
+                    throw error;
+                }
+            };
+
+            const handleFileUpload = async (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                setLoading(true);
+                setError(null);
+                setJsonStructure(null);
+
+                try {
+                    const text = await file.text();
+                    const data = JSON.parse(text);
+                    
+                    // Speichere JSON-Struktur für Debug-Modus
+                    setJsonStructure(data);
+                    
+                    const parsedConversations = parseConversations(data);
+                    
+                    if (parsedConversations.length === 0) {
+                        throw new Error('Keine Konversationen gefunden. Bitte überprüfen Sie das JSON-Format.');
+                    }
+                    
+                    setConversations(parsedConversations);
+                    
+                    // Erweitere automatisch den ersten Tag
+                    const firstDay = getConversationsByDay(parsedConversations)[0];
+                    if (firstDay) {
+                        setExpandedDays(new Set([firstDay.date]));
+                    }
+                } catch (err) {
+                    console.error('Fehler beim Laden der Datei:', err);
+                    setError(`Fehler beim Laden der Datei: ${err.message}`);
+                }
+
+                setLoading(false);
+            };
+
+            const getConversationsByDay = (convs) => {
+                const grouped = {};
+                
+                convs.forEach(conv => {
+                    const date = new Date(conv.created_at).toLocaleDateString('de-DE');
+                    if (!grouped[date]) {
+                        grouped[date] = [];
+                    }
+                    grouped[date].push(conv);
+                });
+
+                return Object.entries(grouped)
+                    .map(([date, conversations]) => ({
+                        date,
+                        conversations: conversations.sort((a, b) => 
+                            new Date(b.created_at) - new Date(a.created_at)
+                        )
+                    }))
+                    .sort((a, b) => new Date(b.date) - new Date(a.date));
+            };
+
+            const filteredConversations = useMemo(() => {
+                let filtered = conversations;
+
+                // Zeitfilter
+                if (selectedFilter !== 'all') {
+                    const now = new Date();
+                    const filterDate = new Date();
+                    
+                    switch (selectedFilter) {
+                        case 'last7days':
+                            filterDate.setDate(now.getDate() - 7);
+                            break;
+                        case 'last30days':
+                            filterDate.setDate(now.getDate() - 30);
+                            break;
+                        case 'thisWeek':
+                            filterDate.setDate(now.getDate() - now.getDay());
+                            break;
+                    }
+                    
+                    filtered = filtered.filter(conv => 
+                        new Date(conv.created_at) >= filterDate
+                    );
+                }
+
+                // Suchfilter
+                if (searchTerm) {
+                    filtered = filtered.filter(conv => {
+                        const searchLower = searchTerm.toLowerCase();
+                        return conv.title.toLowerCase().includes(searchLower) ||
+                               conv.messages.some(msg => 
+                                   msg.content.toLowerCase().includes(searchLower)
+                               );
+                    });
+                }
+
+                return filtered;
+            }, [conversations, selectedFilter, searchTerm]);
+
+            const stats = useMemo(() => {
+                const totalMessages = filteredConversations.reduce((sum, conv) => 
+                    sum + conv.messages.length, 0
+                );
+                const totalChars = filteredConversations.reduce((sum, conv) => 
+                    sum + conv.messages.reduce((msgSum, msg) => 
+                        msgSum + msg.content.length, 0
+                    ), 0
+                );
+
+                return {
+                    conversations: filteredConversations.length,
+                    messages: totalMessages,
+                    characters: totalChars
+                };
+            }, [filteredConversations]);
+
+            const toggleDay = (date) => {
+                const newExpanded = new Set(expandedDays);
+                if (newExpanded.has(date)) {
+                    newExpanded.delete(date);
+                } else {
+                    newExpanded.add(date);
+                }
+                setExpandedDays(newExpanded);
+            };
+
+            const toggleConversation = (id) => {
+                const newExpanded = new Set(expandedConversations);
+                if (newExpanded.has(id)) {
+                    newExpanded.delete(id);
+                } else {
+                    newExpanded.add(id);
+                }
+                setExpandedConversations(newExpanded);
+            };
+
+            const exportToMarkdown = () => {
+                let markdown = '# Claude Konversationen Export\n\n';
+                markdown += `Exportiert am: ${new Date().toLocaleDateString('de-DE')}\n\n`;
+                markdown += `## Statistiken\n`;
+                markdown += `- Konversationen: ${stats.conversations}\n`;
+                markdown += `- Nachrichten: ${stats.messages}\n`;
+                markdown += `- Zeichen: ${stats.characters.toLocaleString('de-DE')}\n\n`;
+
+                const dayGroups = getConversationsByDay(filteredConversations);
+                
+                dayGroups.forEach(({ date, conversations }) => {
+                    markdown += `## ${date}\n\n`;
+                    
+                    conversations.forEach(conv => {
+                        markdown += `### ${conv.title}\n\n`;
+                        
+                        conv.messages.forEach(msg => {
+                            const role = msg.role === 'user' ? 'Human' : 'Claude';
+                            markdown += `**${role}:**\n${msg.content}\n\n`;
+                        });
+                        
+                        markdown += '---\n\n';
+                    });
+                });
+
+                const blob = new Blob([markdown], { type: 'text/markdown' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `claude-conversations-${new Date().toISOString().split('T')[0]}.md`;
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            const generateDaySummary = (conversations) => {
+                const topics = new Set();
+                conversations.forEach(conv => {
+                    conv.messages.slice(0, 2).forEach(msg => {
+                        if (msg.role === 'user') {
+                            const words = msg.content.split(' ').slice(0, 10);
+                            topics.add(words.join(' '));
+                        }
+                    });
+                });
+                
+                return Array.from(topics).slice(0, 3).join(' • ');
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-50">
+                    <header className="bg-white shadow-sm border-b">
+                        <div className="max-w-6xl mx-auto px-4 py-4">
+                            <h1 className="text-2xl font-bold text-gray-900">Claude Conversation Viewer</h1>
+                            <p className="text-sm text-gray-600 mt-1">
+                                Analysiere und durchsuche deine Claude.ai Konversationen
+                            </p>
+                        </div>
+                    </header>
+
+                    <main className="max-w-6xl mx-auto px-4 py-6">
+                        {!conversations.length && !loading && (
+                            <div className="bg-white rounded-lg shadow-sm p-8 text-center">
+                                <div className="mb-6">
+                                    <lucide.FileText className="w-16 h-16 text-gray-400 mx-auto" />
+                                </div>
+                                <h2 className="text-xl font-semibold mb-2">Konversationen laden</h2>
+                                <p className="text-gray-600 mb-6">
+                                    Lade deine conversations.json Datei hoch, um zu beginnen
+                                </p>
+                                <input
+                                    type="file"
+                                    accept=".json"
+                                    onChange={handleFileUpload}
+                                    className="hidden"
+                                    id="file-upload"
+                                />
+                                <label
+                                    htmlFor="file-upload"
+                                    className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 cursor-pointer"
+                                >
+                                    <lucide.Upload className="w-4 h-4 mr-2" />
+                                    JSON-Datei auswählen
+                                </label>
+                                
+                                <div className="mt-8 text-left bg-gray-50 rounded-lg p-4">
+                                    <h3 className="font-semibold mb-2">So exportierst du deine Claude-Konversationen:</h3>
+                                    <ol className="list-decimal list-inside text-sm text-gray-600 space-y-1">
+                                        <li>Gehe zu Claude.ai</li>
+                                        <li>Klicke auf dein Profilbild → Settings → Account</li>
+                                        <li>Klicke auf "Export data"</li>
+                                        <li>Lade die ZIP-Datei herunter</li>
+                                        <li>Entpacke die conversations.json Datei</li>
+                                        <li>Lade sie hier hoch</li>
+                                    </ol>
+                                </div>
+                            </div>
+                        )}
+
+                        {loading && (
+                            <div className="text-center py-12">
+                                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                                <p className="mt-2 text-gray-600">Lade Konversationen...</p>
+                            </div>
+                        )}
+
+                        {error && (
+                            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+                                <div className="flex items-start">
+                                    <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 mr-2" />
+                                    <div className="flex-1">
+                                        <h3 className="text-red-800 font-semibold">Fehler beim Laden</h3>
+                                        <p className="text-red-700 text-sm mt-1">{error}</p>
+                                        {jsonStructure && (
+                                            <button
+                                                onClick={() => setDebugMode(!debugMode)}
+                                                className="mt-2 text-sm text-red-600 hover:text-red-800 flex items-center"
+                                            >
+                                                <Bug className="w-4 h-4 mr-1" />
+                                                Debug-Modus {debugMode ? 'ausblenden' : 'anzeigen'}
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                                
+                                {debugMode && jsonStructure && (
+                                    <div className="mt-4 bg-gray-900 text-gray-100 rounded p-4 overflow-x-auto">
+                                        <p className="text-sm mb-2">JSON-Struktur:</p>
+                                        <pre className="text-xs">
+                                            {JSON.stringify(jsonStructure, null, 2).substring(0, 1000)}...
+                                        </pre>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {conversations.length > 0 && (
+                            <>
+                                <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                                        <div className="text-center">
+                                            <p className="text-3xl font-bold text-gray-900">{stats.conversations}</p>
+                                            <p className="text-sm text-gray-600">Konversationen</p>
+                                        </div>
+                                        <div className="text-center">
+                                            <p className="text-3xl font-bold text-gray-900">{stats.messages}</p>
+                                            <p className="text-sm text-gray-600">Nachrichten</p>
+                                        </div>
+                                        <div className="text-center">
+                                            <p className="text-3xl font-bold text-gray-900">
+                                                {stats.characters.toLocaleString('de-DE')}
+                                            </p>
+                                            <p className="text-sm text-gray-600">Zeichen</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex flex-col md:flex-row gap-4">
+                                        <div className="flex-1">
+                                            <div className="relative">
+                                                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                                                <input
+                                                    type="text"
+                                                    placeholder="Konversationen durchsuchen..."
+                                                    value={searchTerm}
+                                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                                    className="w-full pl-10 pr-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                />
+                                            </div>
+                                        </div>
+                                        
+                                        <select
+                                            value={selectedFilter}
+                                            onChange={(e) => setSelectedFilter(e.target.value)}
+                                            className="px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        >
+                                            <option value="all">Alle Zeiten</option>
+                                            <option value="last7days">Letzte 7 Tage</option>
+                                            <option value="thisWeek">Diese Woche</option>
+                                            <option value="last30days">Letzte 30 Tage</option>
+                                        </select>
+
+                                        <button
+                                            onClick={exportToMarkdown}
+                                            className="flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                                        >
+                                            <Download className="w-4 h-4 mr-2" />
+                                            Als Markdown exportieren
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4">
+                                    {getConversationsByDay(filteredConversations).map(({ date, conversations }) => (
+                                        <div key={date} className="bg-white rounded-lg shadow-sm overflow-hidden">
+                                            <button
+                                                onClick={() => toggleDay(date)}
+                                                className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                                            >
+                                                <div className="flex items-center">
+                                                    <Calendar className="w-5 h-5 text-gray-400 mr-3" />
+                                                    <div className="text-left">
+                                                        <h3 className="font-semibold text-gray-900">{date}</h3>
+                                                        <p className="text-sm text-gray-600">
+                                                            {conversations.length} Konversationen • {generateDaySummary(conversations)}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                {expandedDays.has(date) ? 
+                                                    <ChevronDown className="w-5 h-5 text-gray-400" /> : 
+                                                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                                                }
+                                            </button>
+                                            
+                                            {expandedDays.has(date) && (
+                                                <div className="border-t">
+                                                    {conversations.map(conv => (
+                                                        <div key={conv.id} className="border-b last:border-b-0">
+                                                            <button
+                                                                onClick={() => toggleConversation(conv.id)}
+                                                                className="w-full px-6 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                                                            >
+                                                                <div className="flex items-center flex-1">
+                                                                    <MessageSquare className="w-4 h-4 text-gray-400 mr-3" />
+                                                                    <div className="text-left flex-1">
+                                                                        <h4 className="font-medium text-gray-900">{conv.title}</h4>
+                                                                        <p className="text-sm text-gray-600">
+                                                                            {conv.messages.length} Nachrichten • 
+                                                                            {new Date(conv.created_at).toLocaleTimeString('de-DE', { 
+                                                                                hour: '2-digit', 
+                                                                                minute: '2-digit' 
+                                                                            })}
+                                                                        </p>
+                                                                    </div>
+                                                                </div>
+                                                                {expandedConversations.has(conv.id) ? 
+                                                                    <ChevronDown className="w-4 h-4 text-gray-400" /> : 
+                                                                    <ChevronRight className="w-4 h-4 text-gray-400" />
+                                                                }
+                                                            </button>
+                                                            
+                                                            {expandedConversations.has(conv.id) && (
+                                                                <div className="px-6 py-3 bg-gray-50 max-h-96 overflow-y-auto">
+                                                                    {conv.messages.map((msg, idx) => (
+                                                                        <div key={idx} className="mb-4 last:mb-0">
+                                                                            <div className="font-semibold text-sm mb-1">
+                                                                                {msg.role === 'user' ? 'Human' : 'Claude'}:
+                                                                            </div>
+                                                                            <div className="text-sm text-gray-700 whitespace-pre-wrap">
+                                                                                {msg.content.substring(0, 500)}
+                                                                                {msg.content.length > 500 && '...'}
+                                                                            </div>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                                
+                                {filteredConversations.length === 0 && (
+                                    <div className="bg-white rounded-lg shadow-sm p-8 text-center">
+                                        <p className="text-gray-600">
+                                            Keine Konversationen gefunden, die deinen Filterkriterien entsprechen.
+                                        </p>
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </main>
+                </div>
+            );
+        };
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
