@@ -1,0 +1,82 @@
+{
+  "conversations": {
+    "conv-id-1": {
+      "id": "conv-id-1",
+      "title": "Python Code Hilfe",
+      "created_at": "2024-01-15T10:30:00Z",
+      "updated_at": "2024-01-15T11:00:00Z",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Kannst du mir helfen, eine Python-Funktion zu schreiben, die Fibonacci-Zahlen berechnet?",
+          "created_at": "2024-01-15T10:30:00Z"
+        },
+        {
+          "role": "assistant",
+          "content": "Natürlich! Hier ist eine Python-Funktion, die Fibonacci-Zahlen berechnet:\n\n```python\ndef fibonacci(n):\n    if n <= 0:\n        return []\n    elif n == 1:\n        return [0]\n    elif n == 2:\n        return [0, 1]\n    \n    fib_sequence = [0, 1]\n    for i in range(2, n):\n        next_fib = fib_sequence[i-1] + fib_sequence[i-2]\n        fib_sequence.append(next_fib)\n    \n    return fib_sequence\n```",
+          "created_at": "2024-01-15T10:32:00Z"
+        }
+      ]
+    },
+    "conv-id-2": {
+      "id": "conv-id-2",
+      "title": "JavaScript Fragen",
+      "created_at": "2024-01-16T14:00:00Z",
+      "updated_at": "2024-01-16T14:30:00Z",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Was ist der Unterschied zwischen let und const in JavaScript?",
+          "created_at": "2024-01-16T14:00:00Z"
+        },
+        {
+          "role": "assistant",
+          "content": "In JavaScript gibt es wichtige Unterschiede zwischen `let` und `const`:\n\n1. **const**: \n   - Muss bei der Deklaration initialisiert werden\n   - Der Wert kann nicht neu zugewiesen werden\n   - Bei Objekten/Arrays können die Inhalte geändert werden\n\n2. **let**:\n   - Kann ohne Initialisierung deklariert werden\n   - Der Wert kann neu zugewiesen werden\n   - Block-Scope (wie const)",
+          "created_at": "2024-01-16T14:02:00Z"
+        },
+        {
+          "role": "user",
+          "content": "Kannst du mir ein Beispiel zeigen?",
+          "created_at": "2024-01-16T14:05:00Z"
+        },
+        {
+          "role": "assistant",
+          "content": "Gerne! Hier sind Beispiele:\n\n```javascript\n// let Beispiele\nlet x = 5;\nx = 10; // OK - Neuzuweisung möglich\n\nlet y; // OK - Deklaration ohne Initialisierung\ny = 20;\n\n// const Beispiele\nconst a = 5;\na = 10; // ERROR - Neuzuweisung nicht möglich\n\nconst b; // ERROR - Muss initialisiert werden\n\n// Aber bei Objekten:\nconst obj = { name: 'Max' };\nobj.name = 'Anna'; // OK - Inhalt kann geändert werden\nobj.age = 25; // OK - Neue Eigenschaften hinzufügen\n```",
+          "created_at": "2024-01-16T14:07:00Z"
+        }
+      ]
+    },
+    "conv-id-3": {
+      "id": "conv-id-3",
+      "title": "React Komponenten",
+      "created_at": "2024-01-17T09:00:00Z",
+      "updated_at": "2024-01-17T09:30:00Z",
+      "mapping": {
+        "msg-1": {
+          "message": {
+            "author": {
+              "role": "user"
+            },
+            "content": {
+              "content_type": "text",
+              "text": "Wie erstelle ich eine React-Komponente mit useState?"
+            },
+            "create_time": "2024-01-17T09:00:00Z"
+          }
+        },
+        "msg-2": {
+          "message": {
+            "author": {
+              "role": "assistant"
+            },
+            "content": {
+              "content_type": "text",
+              "text": "Hier ist ein Beispiel einer React-Komponente mit useState:\n\n```jsx\nimport React, { useState } from 'react';\n\nfunction Counter() {\n  const [count, setCount] = useState(0);\n\n  return (\n    <div>\n      <p>Count: {count}</p>\n      <button onClick={() => setCount(count + 1)}>Increment</button>\n      <button onClick={() => setCount(count - 1)}>Decrement</button>\n    </div>\n  );\n}\n```"
+            },
+            "create_time": "2024-01-17T09:02:00Z"
+          }
+        }
+      }
+    }
+  }
+}
