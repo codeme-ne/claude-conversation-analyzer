@@ -1,109 +1,59 @@
-# Claude Conversation Viewer
+# Claude Conversation Analyzer
 
-A React-based tool to visualize and analyze your Claude.ai conversation exports with an intuitive, day-grouped interface.
+[![Claude.ai](https://img.shields.io/badge/Claude.ai-Conversation_Analyzer-191919)](https://claude.ai)
+[![React](https://img.shields.io/badge/React-18-61DAFB)](https://reactjs.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## 🎯 Features
+Analyze and explore your exported Claude conversations in a fast, client-side web app.
 
-- 📅 **Day Grouping**: Conversations organized by date with intelligent AI-generated summaries
-- 🔍 **Advanced Search**: Search through all conversations and messages
-- 📊 **Statistics**: View total conversations, messages, and character counts
-- 🗓️ **Time Filters**: Filter by "Last 7 days", "This week", "Last 30 days" and more
-- 💾 **Markdown Export**: Export filtered conversations to Markdown format
-- 🎨 **Intuitive UI**: Collapsible day views with conversation titles and previews
-- 🐛 **Debug Mode**: Built-in JSON structure analyzer for troubleshooting
+> Built for Claude users: upload `conversations.json`, inspect activity by day, search content, and export filtered results.
 
-## 🚀 Getting Started
+## Live Demo
 
-### Option 1: Use Online (Recommended)
+Try it here: **https://claude-conversation-analyzer.vercel.app**
 
-Simply visit: [https://github.com/codeme-ne/claude-conversation-analyzer/](https://github.com/codeme-ne/claude-conversation-analyzer/)
+## Features
 
+- Group conversations by day with quick summaries
+- Search across titles and message content
+- Filter by time ranges (last 7/30 days, this week, all)
+- View conversation/message/character stats
+- Export filtered conversations to Markdown
+- Debug mode support for unsupported JSON shapes
 
+## Screenshots
 
-### Option 2: Download and Run Locally
-
-1. Download the `index.html` file
-2. Open it in any modern web browser (Chrome, Firefox, Edge, Safari)
-3. Upload your `conversations.json` file
-4. Start exploring your conversations!
-
-### Option 3: Clone and Customize
-
-```bash
-git clone https://github.com/yourusername/claude-conversation-viewer.git
-cd claude-conversation-viewer
-# Open index.html in your browser
-```
-
-## 📝 How to Export Your Claude Conversations
-
-1. Go to [Claude.ai](https://claude.ai)
-2. Click on your profile icon → Settings → Account
-3. Click on "Export data"
-4. Download the ZIP file
-5. Extract the `conversations.json` file
-6. Upload it to the Claude Conversation Viewer
-
-## 🔧 Supported JSON Formats
-
-The tool automatically detects and supports various Claude export formats:
-- Latest format with `conversations` as an object with IDs
-- Legacy formats with conversation arrays
-- Different message structures (with or without timestamps, citations, etc.)
-- Nested message formats with `mapping` objects
-
-## 📸 Screenshots
-
-### Day View with Summaries
+### Day View
 ![Day View](screenshots/day-view.png)
 
 ### Conversation Details
 ![Conversation Details](screenshots/conversation-details.png)
 
-### Statistics Overview
+### Statistics
 ![Statistics](screenshots/statistics.png)
 
-## 🛠️ Technical Details
+## Usage
 
-Built with:
-- **React 18** - UI framework
-- **Tailwind CSS** - Styling
-- **Lucide Icons** - Icon set
-- **No build process required** - Runs directly in browser
+1. Export your data from Claude (`Settings` -> `Account` -> `Export data`)
+2. Extract `conversations.json` from the ZIP
+3. Open the app and upload the JSON file
+4. Filter/search and export to Markdown if needed
 
-Features:
-- Fully client-side - your data never leaves your browser
-- Responsive design - works on desktop and mobile
-- Fast performance - handles large conversation histories
-- Smart text extraction from complex message structures
+## Local Development
 
-## 🤝 Contributing
+No build step is required.
 
-Contributions are welcome! Here's how you can help:
+```bash
+python3 -m http.server 8899
+```
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+Open `http://localhost:8899/index.html`.
 
-### Ideas for Contributions
+## Privacy
 
-- [ ] Add more export formats (PDF, CSV)
-- [ ] Implement conversation search highlighting
-- [ ] Add data visualization charts
-- [ ] Support for multiple file uploads
-- [ ] Conversation tagging system
-- [ ] Dark mode support
-- [ ] Localization to other languages
+- Fully client-side processing
+- No server storage of your conversation data
 
-## 🐛 Troubleshooting
+## License
 
-**No conversations showing?**
-- Enable Debug Mode to see the JSON structure
-- Check if your JSON file is from a Claude export
-- Try refreshing the page and re-uploading
-
-**Messages not displaying correctly?**
-- The tool supports various message formats
-- If you encounter issues, please open an issue with a sample of your JSON structure (remove personal
+[MIT](LICENSE)

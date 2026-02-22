@@ -15,7 +15,21 @@
 
     <script type="text/babel">
         const { useState, useEffect, useMemo, useCallback } = React;
-        const { Calendar, Search, Download, MessageSquare, ChevronDown, ChevronRight, Bug, AlertCircle } = lucide;
+
+        const createIcon = (glyph) => ({ className = '', ...props }) => (
+            <span className={className} {...props} aria-hidden="true">{glyph}</span>
+        );
+
+        const Calendar = createIcon('📅');
+        const Search = createIcon('🔍');
+        const Download = createIcon('⬇️');
+        const MessageSquare = createIcon('💬');
+        const ChevronDown = createIcon('▾');
+        const ChevronRight = createIcon('▸');
+        const Bug = createIcon('🐛');
+        const AlertCircle = createIcon('⚠️');
+        const FileText = createIcon('📄');
+        const Upload = createIcon('📤');
 
         const App = () => {
             const [conversations, setConversations] = useState([]);
@@ -419,7 +433,7 @@
                         {!conversations.length && !loading && (
                             <div className="bg-white rounded-lg shadow-sm p-8 text-center">
                                 <div className="mb-6">
-                                    <lucide.FileText className="w-16 h-16 text-gray-400 mx-auto" />
+                                    <FileText className="w-16 h-16 text-gray-400 mx-auto" />
                                 </div>
                                 <h2 className="text-xl font-semibold mb-2">Konversationen laden</h2>
                                 <p className="text-gray-600 mb-6">
@@ -436,7 +450,7 @@
                                     htmlFor="file-upload"
                                     className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 cursor-pointer"
                                 >
-                                    <lucide.Upload className="w-4 h-4 mr-2" />
+                                    <Upload className="w-4 h-4 mr-2" />
                                     JSON-Datei auswählen
                                 </label>
                                 
