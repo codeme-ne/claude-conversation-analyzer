@@ -49,6 +49,27 @@ python3 -m http.server 8899
 
 Open `http://localhost:8899/index.html`.
 
+## MCP Server (New)
+
+This repository now also includes a production-ready MCP server in [`mcp-server/`](mcp-server/README.md) for agentic retrieval across your conversation archive.
+
+Quick start:
+
+```bash
+cd mcp-server
+npm install
+npm run mcp:ingest -- --file ../data/conversations.json
+npm run mcp:start
+```
+
+Main MCP tools:
+
+- `search_hybrid` (high-precision hybrid retrieval)
+- `answer_with_citations` (extractive answer + citations)
+- `get_conversation`
+- `get_message_context`
+- `stats_overview`
+
 ## Privacy
 
 - Fully client-side processing

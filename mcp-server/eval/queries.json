@@ -1,0 +1,14 @@
+[
+  {
+    "query": "Wie installiere ich superpowers für Claude",
+    "expectedAnyOf": ["Superpowers", "Claude Code", "GitHub"]
+  },
+  {
+    "query": "Akne Studien evidenzbasierte Interventionen",
+    "expectedAnyOf": ["Akne", "evidenz", "Interventionen"]
+  },
+  {
+    "query": "Bürgergeld Anlage HG WEP",
+    "expectedAnyOf": ["Bürgergeld", "Anlage", "HG"]
+  }
+]
