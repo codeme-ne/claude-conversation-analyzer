@@ -9,6 +9,58 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.3/dist/purify.min.js"></script>
+    <style>
+        .message-content h1,
+        .message-content h2,
+        .message-content h3,
+        .message-content h4 {
+            font-weight: 600;
+            margin: 0.75rem 0 0.4rem;
+            line-height: 1.35;
+        }
+        .message-content p {
+            margin: 0 0 0.55rem;
+        }
+        .message-content ul,
+        .message-content ol {
+            margin: 0 0 0.55rem 1.25rem;
+        }
+        .message-content ul {
+            list-style: disc;
+        }
+        .message-content ol {
+            list-style: decimal;
+        }
+        .message-content pre {
+            background: #f3f4f6;
+            border-radius: 0.375rem;
+            padding: 0.75rem;
+            overflow-x: auto;
+            margin: 0 0 0.75rem;
+        }
+        .message-content code {
+            background: #f3f4f6;
+            border-radius: 0.25rem;
+            padding: 0.1rem 0.3rem;
+        }
+        .message-content pre code {
+            background: transparent;
+            padding: 0;
+            border-radius: 0;
+        }
+        .message-content blockquote {
+            border-left: 3px solid #d1d5db;
+            margin: 0 0 0.75rem;
+            padding-left: 0.75rem;
+            color: #4b5563;
+        }
+        .message-content a {
+            color: #2563eb;
+            text-decoration: underline;
+        }
+    </style>
 </head>
 <body>
     <div id="root"></div>
@@ -49,6 +101,39 @@
                 return normalized || 'unknown';
             };
 
+            const cleanDisplayText = (value) => {
+                return String(value || '')
+                    .replace(/\[object Object\](,\[object Object\])*/g, '')
+                    .replace(/\n{3,}/g, '\n\n')
+                    .trim();
+            };
+
+            const extractTextFromContentItem = (item) => {
+                if (!item || typeof item !== 'object') return '';
+
+                // Interne Agent-/Tool-Blöcke nicht in der Chat-Ansicht anzeigen
+                if (['thinking', 'tool_use', 'tool_result', 'token_budget'].includes(item.type)) {
+                    return '';
+                }
+
+                if (typeof item.text === 'string') return item.text;
+                if (typeof item.content === 'string') return item.content;
+
+                if (Array.isArray(item.content)) {
+                    return item.content
+                        .map(extractTextFromContentItem)
+                        .filter(Boolean)
+                        .join('\n');
+                }
+
+                if (item.content && typeof item.content === 'object') {
+                    if (typeof item.content.text === 'string') return item.content.text;
+                    if (typeof item.content.content === 'string') return item.content.content;
+                }
+
+                return '';
+            };
+
             // Robuste Funktion zum Extrahieren von Text aus verschiedenen Message-Formaten
             const extractMessageText = (message) => {
                 if (!message) return '';
@@ -61,39 +146,65 @@
                         const contentText = message.content
                             .map(item => {
                                 if (typeof item === 'string') return item;
-                                if (item.type === 'thinking') return '';
-                                if (item.text) return item.text;
-                                if (item.content) return item.content;
-                                return '';
+                                return extractTextFromContentItem(item);
                             })
                             .filter(Boolean)
-                            .join(' ');
-                        if (contentText) return contentText;
+                            .join('\n\n');
+                        if (contentText) return cleanDisplayText(contentText);
                     }
-                    if (message.content.text) return message.content.text;
+                    if (message.content.text) return cleanDisplayText(message.content.text);
                 }
-                if (message.text) return message.text;
+                if (message.text) return cleanDisplayText(message.text);
                 
                 // Nested message structure mit mapping
                 if (message.mapping) {
                     const mappingValues = Object.values(message.mapping);
-                    return mappingValues
+                    const mappedText = mappingValues
                         .map(item => {
                             if (item.message) return extractMessageText(item.message);
                             return '';
                         })
-                        .join(' ');
+                        .filter(Boolean)
+                        .join('\n\n');
+                    if (mappedText) return cleanDisplayText(mappedText);
                 }
                 
                 // Fallback: Versuche alle string-Properties zu finden
                 const textProperties = ['body', 'value', 'data', 'message_text', 'response'];
                 for (const prop of textProperties) {
                     if (message[prop] && typeof message[prop] === 'string') {
-                        return message[prop];
+                        return cleanDisplayText(message[prop]);
                     }
                 }
                 
-                return JSON.stringify(message).substring(0, 200);
+                return '';
+            };
+
+            const renderMessageHtml = (content) => {
+                if (!content) return '';
+
+                const escaped = cleanDisplayText(content)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/\"/g, '&quot;')
+                    .replace(/'/g, '&#039;')
+                    .replace(/\n/g, '<br/>');
+
+                if (!window.marked) {
+                    return escaped;
+                }
+
+                const rawHtml = window.marked.parse(content, {
+                    gfm: true,
+                    breaks: true
+                });
+
+                if (window.DOMPurify) {
+                    return window.DOMPurify.sanitize(rawHtml);
+                }
+
+                return rawHtml;
             };
 
             // Robuste Funktion zum Parsen verschiedener Claude Export-Formate
@@ -121,9 +232,11 @@
                             // Verschiedene Message-Strukturen unterstützen
                             if (conv.messages && Array.isArray(conv.messages)) {
                                 conv.messages.forEach(msg => {
+                                    const content = extractMessageText(msg);
+                                    if (!content) return;
                                     messages.push({
                                         role: normalizeRole(msg.role || msg.sender || msg.author?.role),
-                                        content: extractMessageText(msg),
+                                        content,
                                         timestamp: msg.created_at || msg.timestamp || msg.create_time || new Date().toISOString()
                                     });
                                 });
@@ -138,9 +251,11 @@
                                 
                                 sortedMapping.forEach(([key, item]) => {
                                     if (item.message && item.message.content) {
+                                        const content = extractMessageText(item.message);
+                                        if (!content) return;
                                         messages.push({
                                             role: normalizeRole(item.message.author?.role || item.message.role),
-                                            content: extractMessageText(item.message),
+                                            content,
                                             timestamp: item.message.create_time || new Date().toISOString()
                                         });
                                     }
@@ -148,9 +263,11 @@
                             } else if (conv.conversation && Array.isArray(conv.conversation)) {
                                 // Alternative structure
                                 conv.conversation.forEach(msg => {
+                                    const content = extractMessageText(msg);
+                                    if (!content) return;
                                     messages.push({
                                         role: normalizeRole(msg.role || msg.type || msg.author),
-                                        content: extractMessageText(msg),
+                                        content,
                                         timestamp: msg.timestamp || msg.created_at || new Date().toISOString()
                                     });
                                 });
@@ -180,9 +297,11 @@
                             
                             if (rawMessages.length > 0) {
                                 rawMessages.forEach(msg => {
+                                    const content = extractMessageText(msg);
+                                    if (!content) return;
                                     messages.push({
                                         role: normalizeRole(msg.role || msg.sender || msg.author?.role),
-                                        content: extractMessageText(msg),
+                                        content,
                                         timestamp: msg.created_at || msg.timestamp || msg.create_time || new Date().toISOString()
                                     });
                                 });
@@ -214,9 +333,11 @@
                             
                             if (rawMessages.length > 0) {
                                 rawMessages.forEach(msg => {
+                                    const content = extractMessageText(msg);
+                                    if (!content) return;
                                     messages.push({
                                         role: normalizeRole(msg.role || msg.sender || msg.author?.role || msg.type || msg.author),
-                                        content: extractMessageText(msg),
+                                        content,
                                         timestamp: msg.timestamp || msg.created_at || msg.create_time || new Date().toISOString()
                                     });
                                 });
@@ -240,11 +361,13 @@
                         (data.chat_messages && Array.isArray(data.chat_messages))
                     ) {
                         const rawMessages = Array.isArray(data.messages) ? data.messages : data.chat_messages;
-                        const messages = rawMessages.map(msg => ({
-                            role: normalizeRole(msg.role || msg.sender || msg.author?.role),
-                            content: extractMessageText(msg),
-                            timestamp: msg.timestamp || msg.created_at || msg.create_time || new Date().toISOString()
-                        }));
+                        const messages = rawMessages
+                            .map(msg => ({
+                                role: normalizeRole(msg.role || msg.sender || msg.author?.role),
+                                content: extractMessageText(msg),
+                                timestamp: msg.timestamp || msg.created_at || msg.create_time || new Date().toISOString()
+                            }))
+                            .filter(msg => !!msg.content);
                         
                         if (messages.length > 0) {
                             parsedConversations.push({
@@ -645,10 +768,10 @@
                                                                             <div className="font-semibold text-sm mb-1">
                                                                                 {msg.role === 'user' ? 'Human' : 'Claude'}:
                                                                             </div>
-                                                                            <div className="text-sm text-gray-700 whitespace-pre-wrap">
-                                                                                {msg.content.substring(0, 500)}
-                                                                                {msg.content.length > 500 && '...'}
-                                                                            </div>
+                                                                            <div
+                                                                                className="message-content text-sm text-gray-700"
+                                                                                dangerouslySetInnerHTML={{ __html: renderMessageHtml(msg.content) }}
+                                                                            />
                                                                         </div>
                                                                     ))}
                                                                 </div>
