@@ -14,7 +14,8 @@
     "mcp:ingest": "tsx src/cli.ts ingest",
     "mcp:reindex": "tsx src/cli.ts reindex",
     "mcp:stats": "tsx src/cli.ts stats",
-    "mcp:eval": "tsx src/cli.ts eval"
+    "mcp:eval": "tsx src/cli.ts eval",
+    "mcp:smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.22.4",

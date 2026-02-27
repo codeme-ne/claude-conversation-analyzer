@@ -3,7 +3,7 @@ import { performance } from 'node:perf_hooks';
 import type { AppDatabase } from '../db/database.js';
 import type { Citation, SearchFilters, SearchHit } from '../types.js';
 import { nowIso } from '../config.js';
-import { buildSnippet, cleanDisplayText, toFtsQuery } from '../utils/text.js';
+import { buildSnippet, cleanDisplayText, toFtsQuery, tokenizeForSearch } from '../utils/text.js';
 import { cosineSimilarity, reciprocalRankFusion } from './ranking.js';
 import type { EmbeddingService } from './embeddings.js';
 
@@ -222,15 +222,45 @@ export class SearchService {
 
     const lexical = this.searchLexical(query, filters, finalTopK * 4);
     const semantic = await this.searchSemantic(query, filters, finalTopK * 4);
+    const queryTerms = tokenizeForSearch(query);
+
+    const providerModel = this.embeddingService.getProviderInfo().model;
+    let semanticForFusion = semantic;
+
+    // Guardrail for low-precision fallback embeddings: when lexical search has no evidence,
+    // require some lexical overlap to avoid false positives.
+    if (lexical.length === 0 && queryTerms.length > 0) {
+      semanticForFusion = semantic.filter((hit) => {
+        const haystack = hit.content.toLowerCase();
+        const overlapCount = queryTerms.reduce(
+          (count, term) => count + (haystack.includes(term) ? 1 : 0),
+          0,
+        );
+
+        if (providerModel.startsWith('hash-')) {
+          return overlapCount > 0 && hit.score >= 0.1;
+        }
+
+        return overlapCount > 0 || hit.score >= 0.25;
+      });
+    }
+
+    if (lexical.length === 0 && semanticForFusion.length === 0) {
+      this.logSearch('hybrid', query, finalTopK, filters, performance.now() - started, 0);
+      return [];
+    }
 
     const lexicalRanks = lexical.map((hit, index) => ({ id: hit.chunkId, score: 1 / (index + 1) }));
-    const semanticRanks = semantic.map((hit, index) => ({ id: hit.chunkId, score: 1 / (index + 1) }));
+    const semanticRanks = semanticForFusion.map((hit, index) => ({
+      id: hit.chunkId,
+      score: 1 / (index + 1),
+    }));
 
     const fused = reciprocalRankFusion([lexicalRanks, semanticRanks], 60);
 
     const byChunkId = new Map<string, SearchHit>();
     lexical.forEach((hit) => byChunkId.set(hit.chunkId, hit));
-    semantic.forEach((hit) => {
+    semanticForFusion.forEach((hit) => {
       const existing = byChunkId.get(hit.chunkId);
       if (!existing || hit.score > existing.score) {
         byChunkId.set(hit.chunkId, hit);

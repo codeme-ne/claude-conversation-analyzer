@@ -148,6 +148,12 @@ Use the compiled server in your MCP client config.
 }
 ```
 
+## Client-specific setup
+
+For concrete setup and verification commands for Claude Code / Claude.ai connector constraints / Codex CLI, see:
+
+- [CLIENT_SETUP.md](CLIENT_SETUP.md)
+
 ## Operational notes
 
 - Database file is local-only (`mcp-server/data/conversations.db`) and git-ignored.
